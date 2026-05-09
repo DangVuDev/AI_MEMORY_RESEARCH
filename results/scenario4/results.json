@@ -1,0 +1,52 @@
+{
+  "scenario": "scenario_4_rag_vs_kg",
+  "rag_avg_score": 0.6888888888888889,
+  "kg_avg_score": 0.5555555555555556,
+  "improvement_percent": -19.354838709677416,
+  "by_question_type": {
+    "simple_fact": {
+      "rag_avg": 0.0,
+      "kg_avg": 0.0
+    },
+    "multi_hop_2": {
+      "rag_avg": 0.8,
+      "kg_avg": 1.0
+    },
+    "multi_hop_3": {
+      "rag_avg": 1.0,
+      "kg_avg": 1.0
+    },
+    "aggregation": {
+      "rag_avg": 0.8,
+      "kg_avg": 0.0
+    },
+    "comparative": {
+      "rag_avg": 1.0,
+      "kg_avg": 1.0
+    }
+  },
+  "individual_scores": {
+    "rag": [
+      0.0,
+      0.8,
+      0.8,
+      1.0,
+      1.0,
+      0.8,
+      1.0,
+      0.8,
+      0.0
+    ],
+    "kg": [
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0
+    ]
+  }
+}

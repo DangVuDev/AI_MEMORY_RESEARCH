@@ -1,0 +1,62 @@
+{
+  "scenario": "scenario_2_chunking",
+  "strategies": {
+    "Fixed_256": {
+      "strategy": "Fixed-size 256 tokens",
+      "num_chunks": 21,
+      "avg_chunk_size": 1109.904761904762,
+      "avg_quality": 0.8833333333333332,
+      "quality_scores": [
+        0.75,
+        1.0,
+        1.0,
+        0.6666666666666666,
+        1.0
+      ]
+    },
+    "Fixed_512": {
+      "strategy": "Fixed-size 512 tokens",
+      "num_chunks": 11,
+      "avg_chunk_size": 2118.909090909091,
+      "avg_quality": 0.8833333333333332,
+      "quality_scores": [
+        0.75,
+        1.0,
+        1.0,
+        0.6666666666666666,
+        1.0
+      ]
+    },
+    "Semantic": {
+      "strategy": "Semantic (similarity > 0.5)",
+      "num_chunks": 115,
+      "avg_chunk_size": 202.6782608695652,
+      "avg_quality": 0.8833333333333332,
+      "quality_scores": [
+        0.75,
+        1.0,
+        1.0,
+        0.6666666666666666,
+        1.0
+      ]
+    },
+    "Recursive": {
+      "strategy": "Recursive (structure-aware)",
+      "num_chunks": 10,
+      "avg_chunk_size": 2330.8,
+      "avg_quality": 0.8833333333333332,
+      "quality_scores": [
+        0.75,
+        1.0,
+        1.0,
+        0.6666666666666666,
+        1.0
+      ]
+    }
+  },
+  "best_strategy": "Fixed_256",
+  "improvements": {
+    "Semantic_vs_Fixed256": 0.0,
+    "Recursive_vs_Fixed256": 0.0
+  }
+}
