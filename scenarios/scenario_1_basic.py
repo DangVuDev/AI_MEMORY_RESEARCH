@@ -19,6 +19,21 @@ import numpy as np
 from typing import List, Tuple
 from pathlib import Path
 
+# Global embedding model (load once)
+_embedder = None
+
+def get_embedder():
+    """Get or create embedder instance"""
+    global _embedder
+    if _embedder is None:
+        try:
+            from sentence_transformers import SentenceTransformer
+            _embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception as e:
+            print(f"  ⚠ Failed to load embedder: {e}")
+            _embedder = False
+    return _embedder if _embedder else None
+
 # Load data
 def load_corpus():
     """Load test corpus from prepared data"""
@@ -30,42 +45,16 @@ def load_corpus():
     return []
 
 
-def prepare_questions():
-    """Prepare 20 test questions"""
-    questions = {
-        "simple": [
-            ("Chính sách hoàn tiền của công ty là gì?", "simple"),
-            ("Giá gói Standard bao nhiêu tiền mỗi tháng?", "simple"),
-            ("Ứng dụng mobile hỗ trợ những nền tảng nào?", "simple"),
-            ("Công ty XYZ được thành lập năm nào?", "simple"),
-            ("Phương thức thanh toán nào được hỗ trợ?", "simple"),
-        ],
-        "multi_hop": [
-            ("Alice và Bob là ai trong công ty, và họ cùng quản lý dự án nào?", "multi_hop"),
-            ("So sánh sản phẩm A và B về giá cả và tính năng?", "multi_hop"),
-            ("Phòng Engineering có bao nhiêu người và họ làm việc trên những dự án nào?", "multi_hop"),
-            ("Roadmap 2024 bao gồm những gì và ai là người quản lý từng dự án?", "multi_hop"),
-            ("Dịch vụ Premium cung cấp những hỗ trợ nào và thông qua kênh nào?", "multi_hop"),
-            ("Khác nhau giữa gói Standard và Enterprise là gì?", "multi_hop"),
-            ("Bob quản lý phòng nào và dự án nào?", "multi_hop"),
-            ("CloudCore project có mục tiêu gì và dự kiến hoàn thành khi nào?", "multi_hop"),
-            ("Làm thế nào để kích hoạt tài khoản sau khi đăng ký?", "multi_hop"),
-            ("Những phương thức thanh toán nào được hỗ trợ và có chiết khấu nào không?", "multi_hop"),
-        ],
-        "synthesis": [
-            ("Tóm tắt các lỗi phổ biến nhất và cách khắc phục?", "synthesis"),
-            ("Tổng hợp toàn bộ chiến lược bảo mật của công ty?", "synthesis"),
-            ("Phân tích lợi thế cạnh tranh của công ty so với các đối thủ?", "synthesis"),
-            ("Mô tả cấu trúc tổ chức và chức năng của từng phòng ban?", "synthesis"),
-            ("Lên kế hoạch nâng cấp từ gói Standard lên Enterprise cần những gì?", "synthesis"),
-        ]
-    }
-    
-    all_questions = []
-    for qtype in ["simple", "multi_hop", "synthesis"]:
-        all_questions.extend(questions[qtype])
-    
-    return all_questions
+def load_questions():
+    """Load test questions from prepared data"""
+    questions_file = Path("data/questions.json")
+    if questions_file.exists():
+        with open(questions_file, encoding="utf-8") as f:
+            data = json.load(f)
+            questions = data.get("questions", [])
+            # Convert to tuples (text, type) for compatibility
+            return [(q["text"], q["type"]) for q in questions]
+    return []
 
 
 def retrieve_random(corpus: List[str], query: str, k: int = 5) -> List[str]:
@@ -73,15 +62,21 @@ def retrieve_random(corpus: List[str], query: str, k: int = 5) -> List[str]:
     return random.sample(corpus, min(k, len(corpus)))
 
 
-def retrieve_cosine(corpus: List[str], query: str, k: int = 5) -> List[str]:
+def retrieve_cosine(corpus: List[str], query: str, k: int = 5, corpus_embs=None, embedder=None) -> List[str]:
     """System B: Cosine similarity retrieval (standard RAG)"""
-    from sentence_transformers import SentenceTransformer, util
+    from sentence_transformers import util
     
     try:
-        embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        if embedder is None:
+            embedder = get_embedder()
+        if not embedder:
+            return retrieve_random(corpus, query, k)
         
         query_emb = embedder.encode(query, convert_to_tensor=True)
-        corpus_embs = embedder.encode(corpus, convert_to_tensor=True)
+        
+        # Use pre-computed corpus embeddings if provided
+        if corpus_embs is None:
+            corpus_embs = embedder.encode(corpus, convert_to_tensor=True)
         
         scores = util.cos_sim(query_emb, corpus_embs)[0]
         top_idx = scores.topk(min(k, len(corpus))).indices.tolist()
@@ -92,10 +87,10 @@ def retrieve_cosine(corpus: List[str], query: str, k: int = 5) -> List[str]:
         return retrieve_random(corpus, query, k)
 
 
-def retrieve_semantic(corpus: List[str], query: str, k: int = 5) -> List[str]:
+def retrieve_semantic(corpus: List[str], query: str, k: int = 5, corpus_embs=None, embedder=None) -> List[str]:
     """System C: Semantic chunking + reranking"""
     # First get candidates using cosine similarity
-    candidates = retrieve_cosine(corpus, query, k=k*2)
+    candidates = retrieve_cosine(corpus, query, k=k*2, corpus_embs=corpus_embs, embedder=embedder)
     
     # Then apply heuristic reranking (bonus for key terms)
     query_words = set(query.lower().split())
@@ -116,14 +111,14 @@ def retrieve_semantic(corpus: List[str], query: str, k: int = 5) -> List[str]:
     return [chunk for chunk, _ in scores[:k]]
 
 
-def retrieve_kg(corpus: List[str], query: str, k: int = 5) -> List[str]:
+def retrieve_kg(corpus: List[str], query: str, k: int = 5, corpus_embs=None, embedder=None) -> List[str]:
     """System D: Knowledge Graph traversal"""
     # Simulate KG by finding chunks with entity co-occurrence
     entities = ["Alice", "Bob", "CloudCore", "DataMind", "Engineering", "Product"]
     query_entities = [e for e in entities if e.lower() in query.lower()]
     
     if not query_entities:
-        return retrieve_semantic(corpus, query, k)
+        return retrieve_semantic(corpus, query, k, corpus_embs=corpus_embs, embedder=embedder)
     
     # Score chunks by number of co-occurring entities
     scored = []
@@ -133,7 +128,7 @@ def retrieve_kg(corpus: List[str], query: str, k: int = 5) -> List[str]:
             scored.append((chunk, entity_count))
     
     if not scored:
-        return retrieve_semantic(corpus, query, k)
+        return retrieve_semantic(corpus, query, k, corpus_embs=corpus_embs, embedder=embedder)
     
     scored.sort(key=lambda x: x[1], reverse=True)
     return [chunk for chunk, _ in scored[:k]]
@@ -161,19 +156,41 @@ def run_scenario_1():
     
     # Load data
     print("\n[1] Loading test data...")
+    
+    # Pre-load embedder once
+    print("  Loading embedding model...")
+    get_embedder()
+    
     corpus = load_corpus()
-    questions = prepare_questions()
+    questions = load_questions()
     
     if not corpus:
         print("  ✗ Corpus not found. Run: python prepare_data.py")
         return None
     
+    if not questions:
+        print("  ✗ Questions not found. Run: python generate_expanded_data.py")
+        return None
+    
     print(f"  ✓ Corpus: {len(corpus)} documents")
     print(f"  ✓ Questions: {len(questions)} câu")
-    print(f"    - Simple: 5, Multi-hop: 10, Synthesis: 5")
+    
+    # Count questions by type
+    q_types = {}
+    for _, qtype in questions:
+        q_types[qtype] = q_types.get(qtype, 0) + 1
+    print(f"    By type: {', '.join(f'{qtype}={count}' for qtype, count in sorted(q_types.items()))}")
     
     # Test systems
     print("\n[2] Testing 4 retrieval systems...\n")
+    
+    # Pre-compute embeddings for corpus (do this once!)
+    embedder = get_embedder()
+    corpus_embs = None
+    if embedder:
+        print("  Pre-computing corpus embeddings...")
+        corpus_embs = embedder.encode(corpus, convert_to_tensor=True)
+        print(f"  ✓ Embeddings computed for {len(corpus)} documents\n")
     
     systems = {
         "A_Random": {"func": retrieve_random, "context": "128K", "retrieval": "Random"},
@@ -193,7 +210,13 @@ def run_scenario_1():
         
         for question, qtype in questions:
             t0 = time.time()
-            retrieved = system_config["func"](corpus, question, k=5)
+            
+            # Pass pre-computed embeddings and embedder to all systems that need them
+            if system_name in ["B_Cosine", "C_Semantic", "D_KG"]:
+                retrieved = system_config["func"](corpus, question, k=5, corpus_embs=corpus_embs, embedder=embedder)
+            else:
+                retrieved = system_config["func"](corpus, question, k=5)
+            
             latency_ms = (time.time() - t0) * 1000
             
             # Create context and evaluate (without actual LLM call for now)
@@ -223,7 +246,26 @@ def run_scenario_1():
     # Statistical analysis
     print("[3] Statistical Analysis\n")
     
-    from utils import StatisticalAnalysis
+    from scipy import stats
+    
+    def paired_t_test(group_a, group_b):
+        """Perform paired t-test"""
+        t_stat, p_value = stats.ttest_rel(group_a, group_b)
+        return t_stat, p_value
+    
+    def cohens_d(group_a, group_b):
+        """Calculate Cohen's d effect size"""
+        n1, n2 = len(group_a), len(group_b)
+        var1, var2 = np.var(group_a, ddof=1), np.var(group_b, ddof=1)
+        
+        # Pooled standard deviation
+        pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+        
+        # Cohen's d
+        if pooled_std == 0:
+            return 0.0
+        
+        return (np.mean(group_a) - np.mean(group_b)) / pooled_std
     
     scores_a = results["A_Random"]["relevances"]
     scores_b = results["B_Cosine"]["relevances"]
@@ -231,13 +273,13 @@ def run_scenario_1():
     scores_d = results["D_KG"]["relevances"]
     
     # Compare B vs A
-    t_stat, p_value = StatisticalAnalysis.paired_t_test(scores_a, scores_b)
-    cohens_d = StatisticalAnalysis.cohens_d(scores_a, scores_b)
+    t_stat, p_value = paired_t_test(scores_a, scores_b)
+    cohens_d_val = cohens_d(scores_a, scores_b)
     
     print(f"System B vs A:")
     print(f"  t-statistic: {t_stat:.3f}")
     print(f"  p-value: {p_value:.4f} {'*' if p_value < 0.05 else ''}")
-    print(f"  Cohen's d: {cohens_d:.3f}")
+    print(f"  Cohen's d: {cohens_d_val:.3f}")
     print()
     
     # Hypothesis check
@@ -282,7 +324,7 @@ def run_scenario_1():
             "B_vs_A": {
                 "t_statistic": float(t_stat),
                 "p_value": float(p_value),
-                "cohens_d": float(cohens_d),
+                "cohens_d": float(cohens_d_val),
                 "significant": bool(p_value < 0.05),
             }
         }

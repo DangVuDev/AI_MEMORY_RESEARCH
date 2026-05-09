@@ -1,0 +1,197 @@
+{
+  "questions": [
+    {
+      "type": "simple",
+      "text": "Chính sách hoàn tiền của công ty là gì?"
+    },
+    {
+      "type": "simple",
+      "text": "Gói Standard giá bao nhiêu mỗi tháng?"
+    },
+    {
+      "type": "simple",
+      "text": "Ai là CEO của công ty XYZ?"
+    },
+    {
+      "type": "simple",
+      "text": "Ai là CTO của công ty XYZ?"
+    },
+    {
+      "type": "simple",
+      "text": "Công ty XYZ được thành lập năm nào?"
+    },
+    {
+      "type": "simple",
+      "text": "Công ty có bao nhiêu nhân viên?"
+    },
+    {
+      "type": "simple",
+      "text": "Phòng nào có 20 người?"
+    },
+    {
+      "type": "simple",
+      "text": "Dự án A tên là gì?"
+    },
+    {
+      "type": "simple",
+      "text": "Dự án B được quản lý bởi ai?"
+    },
+    {
+      "type": "simple",
+      "text": "Phiên bản 2.0 sẽ hỗ trợ bao nhiêu ngôn ngữ?"
+    },
+    {
+      "type": "simple",
+      "text": "SLA guarantee của gói Enterprise là bao nhiêu?"
+    },
+    {
+      "type": "simple",
+      "text": "Uptime của công ty là bao nhiêu?"
+    },
+    {
+      "type": "simple",
+      "text": "Thời gian phản hồi trung bình là bao lâu?"
+    },
+    {
+      "type": "simple",
+      "text": "Hệ thống xử lý bao nhiêu yêu cầu/giây?"
+    },
+    {
+      "type": "simple",
+      "text": "Công ty có bao nhiêu khách hàng?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Alice là CEO và quản lý những phòng nào?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Bob quản lý những dự án nào?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Alice và Bob cùng tham gia vào dự án nào?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Dự án CloudCore được lãnh đạo bởi ai?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Phòng Product có bao nhiêu người?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Phòng nào chuyên gia về UX/UI design?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Khách hàng lớn nhất là ai và hợp đồng bao nhiêu?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Dự án nào tập trung vào ML platform?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Portal được quản lý bởi ai và ở phase nào?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Gói Professional có những tính năng gì?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Công ty nhận được bao nhiêu funding từ angel investor?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Roadmap 2024 bao gồm những gì?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Alice bắt đầu sự nghiệp ở đâu?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Bob được nâng lên vị trí gì vào năm 2019?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Auto-tagging sử dụng công nghệ gì?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Phiên bản 2.0 sẽ có những tính năng AI nào?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Anomaly detection sử dụng thuật toán gì?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Churn rate hiện tại là bao nhiêu?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "NPS score của công ty là bao nhiêu?"
+    },
+    {
+      "type": "multi_hop_2",
+      "text": "Customer lifetime value trung bình là bao nhiêu?"
+    },
+    {
+      "type": "multi_hop_3",
+      "text": "Alice là CEO, quản lý phòng Product, và phòng đó có bao nhiêu người?"
+    },
+    {
+      "type": "multi_hop_3",
+      "text": "Bob là CTO, quản lý dự án DataMind, và dự án đó tập trung vào cái gì?"
+    },
+    {
+      "type": "multi_hop_3",
+      "text": "Dự án CloudCore có 3 phase, phase 2 dự kiến hoàn thành khi nào với ngân sách bao nhiêu?"
+    },
+    {
+      "type": "multi_hop_3",
+      "text": "Công ty được thành lập bởi Alice và Bob, họ gặp nhau tại đâu?"
+    },
+    {
+      "type": "multi_hop_3",
+      "text": "Phòng Engineering có 20 người làm việc trên những dự án nào?"
+    },
+    {
+      "type": "multi_hop_3",
+      "text": "Gói Enterprise được tùy chỉnh và có SLA bao nhiêu?"
+    },
+    {
+      "type": "multi_hop_3",
+      "text": "Công ty có 99.99% uptime, downtime thường là bao lâu?"
+    },
+    {
+      "type": "multi_hop_3",
+      "text": "Roadmap 2025 tập trung vào việc mở rộng vào những thị trường nào?"
+    },
+    {
+      "type": "aggregation",
+      "text": "Tóm tắt chiến lược giá của công ty XYZ"
+    },
+    {
+      "type": "aggregation",
+      "text": "Liệt kê tất cả các gói giá của công ty"
+    },
+    {
+      "type": "aggregation",
+      "text": "Tóm tắt các tính năng bảo mật của sản phẩm"
+    },
+    {
+      "type": "aggregation",
+      "text": "Liệt kê tất cả các partnership của công ty"
+    },
+    {
+      "type": "aggregation",
+      "text": "Tóm tắt roadmap cho năm 2024 và 2025"
+    }
+  ],
+  "count": 48
+}
