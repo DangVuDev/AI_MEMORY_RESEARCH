@@ -1,265 +1,207 @@
 """
-SCENARIO 2: Impact of Chunking Strategies
+Scenario 2: Chunking Strategy Impact
+=====================================
+Kiểm chứng: chiến lược chia chunk ảnh hưởng thế nào đến chất lượng retrieval.
 
-Kiểm chứng: Semantic Chunking nâng cao retrieval quality rõ rệt so với Fixed-size
+Vấn đề thiết kế: corpus docs mỗi cái chỉ ~1 câu → chunking per-doc không
+tạo ra sự khác biệt. Fix: gom nhiều docs thành "passages" rồi áp 3 strategies
+chunking khác nhau → số chunks và nội dung khác nhau thực sự.
 
-4 chiến lược được test:
-- Fixed-size 256: Chia theo fixed size 256 tokens, overlap 20
-- Fixed-size 512: Chia theo fixed size 512 tokens, overlap 50
-- Semantic: Chia dựa trên cosine similarity breakpoints
-- Recursive: Chia theo cấu trúc văn bản đệ quy
+3 Chunking Strategies:
+  A_Sentence  – mỗi câu (split ". ") từ passages lớn → nhiều chunks nhỏ
+  B_FixedSize – chunk cố định 25 từ, overlap 5 → chunks vừa
+  C_Semantic  – gom câu liên quan thành nhóm (threshold 0.6) → chunks lớn
 """
-
 import json
-import os
-import numpy as np
+import time
 from typing import List
-from pathlib import Path
+
+import numpy as np
+from scipy import stats
+from sentence_transformers import util
+
+from retriever import load_corpus, load_questions, get_embedder
+from openai_client import generate_answer, evaluate_relevance
+from config import RESULTS_DIR, TOP_K
+from utils.metrics import evaluate_common_metrics
 
 
-def load_corpus():
-    """Load test corpus"""
-    corpus_file = Path("data/corpus.json")
-    if corpus_file.exists():
-        with open(corpus_file, encoding="utf-8") as f:
-            data = json.load(f)
-            return data["corpus"]
-    return []
+# ── Build passages: gom N docs liền nhau thành 1 passage ──────────────────────
+
+def build_passages(corpus: List[str], group_size: int = 5) -> List[str]:
+    """Gom từng nhóm group_size docs liền nhau thành 1 passage để chunking."""
+    passages = []
+    for i in range(0, len(corpus), group_size):
+        block = " ".join(corpus[i: i + group_size])
+        passages.append(block)
+    return passages
 
 
-def fixed_size_chunking(documents: List[str], chunk_size: int, overlap: int = 0) -> List[str]:
-    """Split documents into fixed-size chunks"""
+# ── Chunking functions ────────────────────────────────────────────────────────
+
+def chunk_by_sentence(passages: List[str]) -> List[str]:
+    """Tách từng câu (split '. ') → nhiều chunk nhỏ."""
     chunks = []
-    
-    for doc in documents:
-        words = doc.split()
-        for i in range(0, len(words), chunk_size - overlap):
-            chunk = " ".join(words[i:i + chunk_size])
-            if chunk.strip():
+    for passage in passages:
+        for sent in passage.replace("!", ".").replace("?", ".").split(". "):
+            s = sent.strip().rstrip(".")
+            if len(s) > 15:
+                chunks.append(s)
+    return chunks
+
+
+def chunk_fixed_size(passages: List[str], size: int = 25, overlap: int = 5) -> List[str]:
+    """Chunk cố định size từ, overlap từ → chunks vừa."""
+    chunks = []
+    for passage in passages:
+        words = passage.split()
+        start = 0
+        while start < len(words):
+            chunk = " ".join(words[start: start + size])
+            if len(chunk) > 15:
                 chunks.append(chunk)
-    
+            start += size - overlap
     return chunks
 
 
-def semantic_chunking(documents: List[str], threshold: float = 0.5) -> List[str]:
-    """Split documents where semantic similarity drops below threshold"""
+def chunk_semantic(passages: List[str], threshold: float = 0.60) -> List[str]:
+    """Gom các câu liên tiếp có cosine sim > threshold thành 1 chunk → chunks lớn hơn."""
+    embedder = get_embedder()
     chunks = []
-    
-    try:
-        from sentence_transformers import SentenceTransformer, util
-        embedder = SentenceTransformer("all-MiniLM-L6-v2")
-        
-        for doc in documents:
-            sentences = doc.split(". ")
-            if len(sentences) <= 1:
-                chunks.append(doc)
-                continue
-            
-            sentence_embs = embedder.encode(sentences, convert_to_tensor=True)
-            
-            current_chunk = [sentences[0]]
-            
-            for i in range(1, len(sentences)):
-                if i > 0:
-                    similarity = util.cos_sim(sentence_embs[i-1], sentence_embs[i]).item()
-                    
-                    if similarity >= threshold:
-                        current_chunk.append(sentences[i])
-                    else:
-                        chunks.append(". ".join(current_chunk))
-                        current_chunk = [sentences[i]]
-            
-            if current_chunk:
-                chunks.append(". ".join(current_chunk))
-        
-        return chunks
-    
-    except Exception as e:
-        print(f"  ⚠ Semantic chunking error: {e}, using fixed-size instead")
-        return fixed_size_chunking(documents, 256)
-
-
-def recursive_chunking(documents: List[str], max_size: int = 512) -> List[str]:
-    """Recursively split documents respecting structure"""
-    chunks = []
-    
-    for doc in documents:
-        # Split by sentences first
-        sentences = doc.split(". ")
-        
-        current_chunk = []
-        current_len = 0
-        
-        for sentence in sentences:
-            sentence_len = len(sentence.split())
-            
-            if current_len + sentence_len <= max_size:
-                current_chunk.append(sentence)
-                current_len += sentence_len
+    for passage in passages:
+        sentences = [s.strip() for s in passage.replace("!", ".").replace("?", ".").split(". ")
+                     if len(s.strip()) > 10]
+        if len(sentences) <= 1:
+            if sentences:
+                chunks.append(sentences[0])
+            continue
+        embs = embedder.encode(sentences, convert_to_tensor=True, show_progress_bar=False)
+        current_group = [sentences[0]]
+        for i in range(1, len(sentences)):
+            sim = float(util.cos_sim(embs[i - 1], embs[i]))
+            if sim >= threshold:
+                current_group.append(sentences[i])
             else:
-                if current_chunk:
-                    chunks.append(". ".join(current_chunk))
-                current_chunk = [sentence]
-                current_len = sentence_len
-        
-        if current_chunk:
-            chunks.append(". ".join(current_chunk))
-    
+                chunks.append(". ".join(current_group))
+                current_group = [sentences[i]]
+        chunks.append(". ".join(current_group))
     return chunks
 
 
-def evaluate_chunking_quality(chunks: List[str], query: str) -> float:
-    """Evaluate chunking quality by measuring retrieval effectiveness"""
-    query_words = set(query.lower().split())
-    
-    # Find most relevant chunks
-    chunk_scores = []
-    for chunk in chunks:
-        chunk_words = set(chunk.lower().split())
-        overlap = len(query_words & chunk_words)
-        chunk_scores.append(overlap)
-    
-    if not chunk_scores:
-        return 0.0
-    
-    # Average relevance of top 3 chunks
-    top_scores = sorted(chunk_scores, reverse=True)[:3]
-    return np.mean(top_scores) / max(len(query_words), 1)
+def encode_chunks(chunks: List[str]):
+    embedder = get_embedder()
+    return embedder.encode(chunks, convert_to_tensor=True, show_progress_bar=False)
 
 
-def run_scenario_2():
-    """
-    Run Scenario 2: Chunking Strategy Comparison
-    """
-    print("\n" + "="*80)
-    print("SCENARIO 2: Chunking Strategy Impact Analysis")
-    print("="*80)
-    
-    # Load corpus
-    print("\n[1] Loading test data...")
-    corpus = load_corpus()
-    
-    if not corpus:
-        print("  ✗ Corpus not found. Run: python prepare_data.py")
-        return None
-    
-    print(f"  ✓ Loaded {len(corpus)} documents")
-    
-    # Create long document for testing (simulate long manual/documentation)
-    long_doc = " ".join(corpus) * 2  # Simulate longer document
-    
-    test_queries = [
-        "Chính sách hoàn tiền",
-        "Sản phẩm A tính năng",
-        "Công ty XYZ Alice Bob",
-        "Dự án CloudCore",
-        "Support 24/7",
-    ]
-    
-    # Test chunking strategies
-    print("\n[2] Testing chunking strategies...\n")
-    
+def retrieve_from_chunks(chunks: List[str], query: str, k: int = TOP_K, chunk_embs=None) -> List[str]:
+    embedder = get_embedder()
+    q_emb = embedder.encode(query, convert_to_tensor=True)
+    c_embs = chunk_embs if chunk_embs is not None else encode_chunks(chunks)
+    scores = util.cos_sim(q_emb, c_embs)[0]
+    top_idx = scores.topk(min(k, len(chunks))).indices.tolist()
+    return [chunks[i] for i in top_idx]
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def run() -> dict:
+    print("\n" + "=" * 70)
+    print("SCENARIO 2 — Chunking Strategy Impact")
+    print("=" * 70)
+
+    corpus    = load_corpus()
+    questions = load_questions()
+    print(f"\n    corpus={len(corpus)} docs  |  questions={len(questions)}\n")
+
+    # Gom docs thành passages để chunking có ý nghĩa
+    print("[1] Building passages (group_size=5) then chunking...")
+    passages = build_passages(corpus, group_size=5)
+    print(f"    {len(corpus)} docs → {len(passages)} passages")
+
     strategies = {
-        "Fixed_256": {
-            "func": lambda docs: fixed_size_chunking(docs, chunk_size=256, overlap=20),
-            "label": "Fixed-size 256 tokens"
-        },
-        "Fixed_512": {
-            "func": lambda docs: fixed_size_chunking(docs, chunk_size=512, overlap=50),
-            "label": "Fixed-size 512 tokens"
-        },
-        "Semantic": {
-            "func": lambda docs: semantic_chunking(docs, threshold=0.5),
-            "label": "Semantic (similarity > 0.5)"
-        },
-        "Recursive": {
-            "func": lambda docs: recursive_chunking(docs, max_size=512),
-            "label": "Recursive (structure-aware)"
-        },
+        "A_Sentence":  chunk_by_sentence(passages),
+        "B_FixedSize": chunk_fixed_size(passages, size=25, overlap=5),
+        "C_Semantic":  chunk_semantic(passages, threshold=0.60),
     }
-    
-    results = {}
-    
-    for strategy_name, strategy_config in strategies.items():
-        print(f"Strategy {strategy_name} ({strategy_config['label']}):")
-        
-        # Create chunks
-        chunks = strategy_config["func"]([long_doc])
-        
-        # Evaluate on test queries
-        qualities = []
-        for query in test_queries:
-            quality = evaluate_chunking_quality(chunks, query)
-            qualities.append(quality)
-        
-        avg_quality = np.mean(qualities)
-        avg_chunk_size = len(long_doc) / len(chunks) if chunks else 0
-        
-        print(f"  Number of chunks: {len(chunks)}")
-        print(f"  Avg chunk size: {avg_chunk_size:.0f} chars")
-        print(f"  Avg retrieval quality: {avg_quality:.3f}")
-        print()
-        
-        results[strategy_name] = {
-            "strategy": strategy_config["label"],
+    for name, chunks in strategies.items():
+        avg_len = int(np.mean([len(c.split()) for c in chunks]))
+        print(f"    {name}: {len(chunks)} chunks  (avg {avg_len} words/chunk)")
+
+    print("\n[2] Running all strategies...\n")
+    all_results: dict[str, dict] = {}
+
+    for strat_name, chunks in strategies.items():
+        print(f"  ▶ {strat_name}")
+        relevances, latencies = [], []
+        precisions, recalls, faiths, hallucs = [], [], [], []
+
+        print(f"    Pre-computing {len(chunks)} chunk embeddings...")
+        chunk_embs = encode_chunks(chunks)
+
+        for i, (question, _) in enumerate(questions, 1):
+            t0 = time.time()
+            docs    = retrieve_from_chunks(chunks, question, chunk_embs=chunk_embs)
+            context = "\n---\n".join(docs)
+            answer  = generate_answer(question, context)
+            score   = evaluate_relevance(question, context, answer)
+            m = evaluate_common_metrics(question, docs, chunks, answer, context)
+            elapsed = (time.time() - t0) * 1000
+            relevances.append(score)
+            latencies.append(elapsed)
+            precisions.append(m["context_precision"])
+            recalls.append(m["context_recall"])
+            faiths.append(m["faithfulness"])
+            hallucs.append(m["hallucination_rate"])
+
+            if i % 10 == 0 or i == len(questions):
+                print(f"    {i:>2}/{len(questions)}  avg_rel={np.mean(relevances):.3f}")
+
+        all_results[strat_name] = {
             "num_chunks": len(chunks),
-            "avg_chunk_size": float(avg_chunk_size),
-            "avg_quality": float(avg_quality),
-            "quality_scores": [float(q) for q in qualities],
+            "avg_relevance": float(np.mean(relevances)),
+            "avg_latency_ms": float(np.mean(latencies)),
+            "avg_context_precision": float(np.mean(precisions)),
+            "avg_context_recall": float(np.mean(recalls)),
+            "avg_faithfulness": float(np.mean(faiths)),
+            "avg_hallucination_rate": float(np.mean(hallucs)),
+            "relevances": [float(r) for r in relevances],
         }
-    
-    # Analysis
-    print("[3] Comparative Analysis\n")
-    
-    fixed_256_quality = results["Fixed_256"]["avg_quality"]
-    semantic_quality = results["Semantic"]["avg_quality"]
-    recursive_quality = results["Recursive"]["avg_quality"]
-    
-    semantic_improvement = ((semantic_quality - fixed_256_quality) / max(fixed_256_quality, 0.001)) * 100
-    recursive_improvement = ((recursive_quality - fixed_256_quality) / max(fixed_256_quality, 0.001)) * 100
-    
-    print(f"Fixed 256 (baseline):      {fixed_256_quality:.3f}")
-    print(f"Fixed 512:                 {results['Fixed_512']['avg_quality']:.3f}")
-    print(f"Semantic (intelligent):    {semantic_quality:.3f} ({semantic_improvement:+.1f}%)")
-    print(f"Recursive (structured):    {recursive_quality:.3f} ({recursive_improvement:+.1f}%)")
-    print()
-    
-    # Determine best strategy
-    best_strategy = max(results.items(), key=lambda x: x[1]["avg_quality"])[0]
-    
-    print("✓ KEY FINDING:")
-    if best_strategy in ["Semantic", "Recursive"]:
-        print(f"  {best_strategy} is the best strategy for retrieval quality")
-        print("  → Intelligent chunking outperforms fixed-size")
-    else:
-        print("  Fixed-size chunking is most effective for this corpus")
-    
-    # Save results
-    output_data = {
-        "scenario": "scenario_2_chunking",
-        "strategies": results,
-        "best_strategy": best_strategy,
-        "improvements": {
-            "Semantic_vs_Fixed256": float(semantic_improvement),
-            "Recursive_vs_Fixed256": float(recursive_improvement),
+        print(f"    ✓ avg_relevance={all_results[strat_name]['avg_relevance']:.3f}\n")
+
+    # ── Stats ──────────────────────────────────────────────────────────────────
+    print("[3] Statistical Analysis")
+    a_scores = np.array(all_results["A_Sentence"]["relevances"])
+    stats_output = {}
+
+    for name in ["B_FixedSize", "C_Semantic"]:
+        b_scores = np.array(all_results[name]["relevances"])
+        t_stat, p_val = stats.ttest_rel(a_scores, b_scores)
+        pooled = np.sqrt((np.var(a_scores, ddof=1) + np.var(b_scores, ddof=1)) / 2)
+        d = float((np.mean(b_scores) - np.mean(a_scores)) / pooled) if pooled > 0 else 0.0
+        imp = (np.mean(b_scores) - np.mean(a_scores)) / max(np.mean(a_scores), 1e-9) * 100
+        stats_output[f"{name}_vs_A"] = {
+            "t_stat": float(t_stat), "p_value": float(p_val),
+            "cohens_d": d, "improvement_pct": float(imp), "significant": bool(p_val < 0.05),
         }
+        print(f"  {name} vs A_Sentence: t={t_stat:.3f}, p={p_val:.4f}, +{imp:.1f}%")
+
+    best = max(all_results, key=lambda k: all_results[k]["avg_relevance"])
+    print(f"\n  Best strategy: {best} (avg={all_results[best]['avg_relevance']:.3f})")
+
+    output = {
+        "scenario": "2_chunking_strategy_impact",
+        "best_strategy": best,
+        "strategies": all_results,
+        "statistical_tests": stats_output,
     }
-    
-    os.makedirs("results/scenario2", exist_ok=True)
-    
-    with open("results/scenario2/results.json", "w", encoding="utf-8") as f:
-        json.dump(output_data, f, indent=2, ensure_ascii=False)
-    
-    print(f"\n✓ Results saved to: results/scenario2/results.json")
-    print("="*80)
-    
-    return output_data
+    out_dir = RESULTS_DIR / "scenario2"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / "results.json"
+    with open(out_file, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+    print(f"\n  ✓ Saved → {out_file}\n")
+    return output
 
 
 if __name__ == "__main__":
-    try:
-        run_scenario_2()
-    except Exception as e:
-        print(f"\n✗ Error: {e}")
-        import traceback
-        traceback.print_exc()
+    run()

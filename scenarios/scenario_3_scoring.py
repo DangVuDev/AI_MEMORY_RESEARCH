@@ -1,208 +1,239 @@
 """
-SCENARIO 3: Episodic Memory Scoring Optimization
+Scenario 3: Memory Scoring Strategies
+======================================
+So sánh các cách chấm điểm ưu tiên tài liệu khi rerank:
 
-Kiểm chứng: Tìm trọng số tối ưu cho scoring formula
-Score(m) = α*Recency + β*Importance + γ*Relevance
-
-Grid search các tổ hợp α, β, γ với α+β+γ = 1
+  A_Recency    – ưu tiên tài liệu mới (index cao = mới hơn)
+  B_Importance – ưu tiên tài liệu dài/phong phú (proxy = độ dài)
+  C_Relevance  – thuần cosine similarity
+  D_Combined   – kết hợp cả 3 (weighted sum)
 """
-
 import json
-import os
-import numpy as np
-from typing import List, Tuple, Dict
+import time
 from itertools import product
+from typing import List
+
+import numpy as np
+from scipy import stats
+from sentence_transformers import util
+
+from retriever import load_corpus, load_questions, get_embedder
+from openai_client import generate_answer, evaluate_relevance
+from config import RESULTS_DIR, TOP_K
+from utils.metrics import evaluate_common_metrics
 
 
-class EpisodicMemory:
-    """Represent a memory with recency, importance, and relevance"""
-    
-    def __init__(self, content: str, age_hours: int, importance: int):
-        self.content = content
-        self.age_hours = age_hours
-        self.importance = importance  # Scale 1-10
-    
-    def compute_recency(self, max_age_hours: int = 1000) -> float:
-        """Recency score: inversely proportional to age"""
-        return 1.0 - min(self.age_hours / max_age_hours, 1.0)
-    
-    def compute_importance(self) -> float:
-        """Importance score: normalized 1-10 to 0-1"""
-        return self.importance / 10.0
-    
-    def compute_relevance(self, query: str) -> float:
-        """Relevance score: word overlap with query"""
-        query_words = set(query.lower().split())
-        content_words = set(self.content.lower().split())
-        
-        if not query_words or not content_words:
-            return 0.0
-        
-        overlap = len(query_words & content_words)
-        union = len(query_words | content_words)
-        
-        return overlap / union if union > 0 else 0.0
-    
-    def compute_score(self, query: str, alpha: float, beta: float, gamma: float) -> float:
-        """Compute combined score with given weights"""
-        recency = self.compute_recency()
-        importance = self.compute_importance()
-        relevance = self.compute_relevance(query)
-        
-        return alpha * recency + beta * importance + gamma * relevance
+# ── Scoring helpers ────────────────────────────────────────────────────────────
+
+def score_recency(idx: int, total: int) -> float:
+    """Tài liệu có index càng cao → càng mới → điểm cao."""
+    return idx / max(total - 1, 1)
 
 
-def prepare_test_memories() -> List[EpisodicMemory]:
-    """Create test memories with varied ages and importance"""
-    memories = [
-        EpisodicMemory("Chính sách hoàn tiền 30 ngày", age_hours=10, importance=9),
-        EpisodicMemory("Sản phẩm A tính năng ML", age_hours=20, importance=8),
-        EpisodicMemory("Giá gói Standard 29 USD", age_hours=5, importance=7),
-        EpisodicMemory("Alice CEO Công ty XYZ", age_hours=100, importance=9),
-        EpisodicMemory("Bob CTO quản lý Engineering", age_hours=50, importance=8),
-        EpisodicMemory("CloudCore dự án 2024", age_hours=15, importance=10),
-        EpisodicMemory("DataMind ML platform", age_hours=200, importance=7),
-        EpisodicMemory("Support 24/7 Premium", age_hours=30, importance=8),
-        EpisodicMemory("Roadmap 2024 công ty", age_hours=2, importance=9),
-        EpisodicMemory("Payment methods credit card paypal", age_hours=25, importance=6),
-    ]
-    return memories
+def score_importance(doc: str) -> float:
+    """Proxy bằng độ dài chuẩn hoá (0-1)."""
+    return min(len(doc) / 500.0, 1.0)
 
 
-def prepare_test_queries() -> List[str]:
-    """Create test queries for evaluation"""
-    queries = [
-        "Chính sách hoàn tiền",
-        "Sản phẩm A tính năng",
-        "Alice Bob công ty",
-        "CloudCore dự án",
-    ]
-    return queries
+def retrieve_scored(
+    corpus: List[str],
+    query: str,
+    mode: str,            # "recency" | "importance" | "relevance" | "combined"
+    k: int = TOP_K,
+    corpus_embs=None,
+    combined_weights: tuple[float, float, float] = (0.5, 0.3, 0.2),
+) -> List[str]:
+    embedder = get_embedder()
+    q_emb    = embedder.encode(query, convert_to_tensor=True)
+    c_embs   = corpus_embs if corpus_embs is not None else embedder.encode(corpus, convert_to_tensor=True)
+    cos_sims = util.cos_sim(q_emb, c_embs)[0].tolist()
+    total    = len(corpus)
+    alpha, beta, gamma = combined_weights
+
+    scored = []
+    for i, doc in enumerate(corpus):
+        rel  = cos_sims[i]
+        rec  = score_recency(i, total)
+        imp  = score_importance(doc)
+
+        if mode == "recency":
+            final = rec
+        elif mode == "importance":
+            final = imp
+        elif mode == "relevance":
+            final = rel
+        else:  # combined
+            final = alpha * rec + beta * imp + gamma * rel
+
+        scored.append((doc, final))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [d for d, _ in scored[:k]]
 
 
-def evaluate_weight_combination(memories: List[EpisodicMemory], 
-                               queries: List[str],
-                               alpha: float, 
-                               beta: float, 
-                               gamma: float) -> float:
-    """
-    Evaluate a weight combination by computing average score
-    for finding the top memory for each query
-    """
-    total_score = 0.0
-    
-    for query in queries:
-        scores = [mem.compute_score(query, alpha, beta, gamma) for mem in memories]
-        max_score = max(scores) if scores else 0.0
-        total_score += max_score
-    
-    return total_score / len(queries) if queries else 0.0
+def grid_search_weights(
+    corpus: List[str],
+    questions: List[tuple[str, str]],
+    corpus_embs,
+    k: int = TOP_K,
+) -> tuple[tuple[float, float, float], float, list[dict]]:
+    """Find best (alpha, beta, gamma) with alpha+beta+gamma=1 using retrieval proxy."""
+    embedder = get_embedder()
+    total = len(corpus)
+    recency = np.array([score_recency(i, total) for i in range(total)], dtype=np.float32)
+    importance = np.array([score_importance(doc) for doc in corpus], dtype=np.float32)
+
+    candidates: list[tuple[float, float, float]] = []
+    weights = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    for a, b, g in product(weights, repeat=3):
+        if abs((a + b + g) - 1.0) <= 0.01:
+            candidates.append((a, b, g))
+
+    query_embs = embedder.encode([q for q, _ in questions], convert_to_tensor=True, show_progress_bar=False)
+    rel_matrix = util.cos_sim(query_embs, corpus_embs).cpu().numpy()
+
+    scored_candidates = []
+    for alpha, beta, gamma in candidates:
+        # Weighted rank score for docs per query.
+        rank_base = alpha * recency + beta * importance
+        top_rel_means = []
+        for i in range(len(questions)):
+            rel = rel_matrix[i]
+            final = rank_base + gamma * rel
+            top_idx = np.argsort(-final)[:k]
+            top_rel_means.append(float(np.mean(rel[top_idx])))
+        mean_proxy = float(np.mean(top_rel_means))
+        scored_candidates.append(
+            {"alpha": alpha, "beta": beta, "gamma": gamma, "proxy_retrieval_score": mean_proxy}
+        )
+
+    scored_candidates.sort(key=lambda x: x["proxy_retrieval_score"], reverse=True)
+    best = scored_candidates[0]
+    return (best["alpha"], best["beta"], best["gamma"]), best["proxy_retrieval_score"], scored_candidates[:10]
 
 
-def run_scenario_3():
-    """
-    Run Scenario 3: Memory Scoring Optimization
-    """
-    print("\n" + "="*80)
-    print("SCENARIO 3: Episodic Memory Scoring Weight Optimization")
-    print("="*80)
-    
-    # Prepare data
-    print("\n[1] Preparing test data...")
-    memories = prepare_test_memories()
-    queries = prepare_test_queries()
-    
-    print(f"  ✓ Memories: {len(memories)}")
-    print(f"  ✓ Queries: {len(queries)}")
-    
-    # Grid search
-    print("\n[2] Grid search for optimal weights...\n")
-    
-    weights_to_test = np.linspace(0, 1, 11)  # [0.0, 0.1, 0.2, ..., 1.0]
-    results_list = []
-    
-    for alpha, beta, gamma in product(weights_to_test, repeat=3):
-        # Only test combinations where weights sum to 1.0
-        if abs(alpha + beta + gamma - 1.0) > 0.01:
-            continue
-        
-        score = evaluate_weight_combination(memories, queries, alpha, beta, gamma)
-        
-        results_list.append({
-            "alpha": float(alpha),
-            "beta": float(beta),
-            "gamma": float(gamma),
-            "avg_score": float(score),
-        })
-    
-    # Sort by score
-    results_list.sort(key=lambda x: x["avg_score"], reverse=True)
-    
-    print(f"✓ Tested {len(results_list)} weight combinations\n")
-    print("Top 10 Weight Configurations:\n")
-    
-    for i, result in enumerate(results_list[:10]):
-        print(f"#{i+1}: α={result['alpha']:.1f}, β={result['beta']:.1f}, γ={result['gamma']:.1f}")
-        print(f"    Score: {result['avg_score']:.3f}")
-        print()
-    
-    best = results_list[0]
-    
-    # Analysis
-    print("[3] Analysis & Findings\n")
-    
-    print(f"Optimal weight configuration:")
-    print(f"  α (Recency):    {best['alpha']:.1f}")
-    print(f"  β (Importance): {best['beta']:.1f}")
-    print(f"  γ (Relevance):  {best['gamma']:.1f}")
-    print(f"  Score: {best['avg_score']:.3f}")
-    print()
-    
-    # Interpretation
-    print("✓ KEY FINDINGS:\n")
-    
-    if best['gamma'] >= 0.7:
-        print(f"  Relevance (γ={best['gamma']:.1f}) dominates the optimal scoring!")
-        print("  → Quality matches are most important")
-    elif best['beta'] >= 0.7:
-        print(f"  Importance (β={best['beta']:.1f}) dominates the optimal scoring!")
-        print("  → Priority/importance matters most")
-    elif best['alpha'] >= 0.7:
-        print(f"  Recency (α={best['alpha']:.1f}) dominates the optimal scoring!")
-        print("  → Recent memories matter most")
-    else:
-        print("  Balanced weights are optimal")
-        print("  → All factors contribute equally")
-    
-    # Save results
-    output_data = {
-        "scenario": "scenario_3_scoring",
-        "total_combinations_tested": len(results_list),
-        "best_weights": {
-            "alpha_recency": best['alpha'],
-            "beta_importance": best['beta'],
-            "gamma_relevance": best['gamma'],
-        },
-        "best_score": best['avg_score'],
-        "top_10_configurations": results_list[:10],
-        "all_results": results_list,  # Save all for later analysis
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def run() -> dict:
+    print("\n" + "=" * 70)
+    print("SCENARIO 3 — Memory Scoring Strategies")
+    print("=" * 70)
+
+    corpus    = load_corpus()
+    questions = load_questions()
+    print("[0] Pre-computing corpus embeddings...")
+    corpus_embs = get_embedder().encode(corpus, convert_to_tensor=True, show_progress_bar=False)
+
+    print("[0.1] Grid search for combined score weights (alpha, beta, gamma)...")
+    best_weights, best_proxy, top_grid = grid_search_weights(corpus, questions, corpus_embs, k=TOP_K)
+    print(
+        f"    Best weights: alpha={best_weights[0]:.1f}, beta={best_weights[1]:.1f}, "
+        f"gamma={best_weights[2]:.1f} (proxy={best_proxy:.4f})"
+    )
+    print(f"\n    corpus={len(corpus)} docs  |  questions={len(questions)}\n")
+
+    systems = {
+        "A_Recency":    "recency",
+        "B_Importance": "importance",
+        "C_Relevance":  "relevance",
+        "D_Combined":   "combined",
     }
-    
-    os.makedirs("results/scenario3", exist_ok=True)
-    
-    with open("results/scenario3/results.json", "w", encoding="utf-8") as f:
-        json.dump(output_data, f, indent=2, ensure_ascii=False)
-    
-    print(f"\n✓ Results saved to: results/scenario3/results.json")
-    print("="*80)
-    
-    return output_data
+
+    print("[1] Running all scoring strategies...\n")
+    all_results: dict[str, dict] = {}
+
+    for sys_name, mode in systems.items():
+        print(f"  ▶ {sys_name}")
+        relevances, latencies = [], []
+        precisions, recalls, faiths, hallucs = [], [], [], []
+
+        for i, (question, _) in enumerate(questions, 1):
+            t0 = time.time()
+            if mode == "combined":
+                docs = retrieve_scored(
+                    corpus,
+                    question,
+                    mode=mode,
+                    k=TOP_K,
+                    corpus_embs=corpus_embs,
+                    combined_weights=best_weights,
+                )
+            else:
+                docs = retrieve_scored(
+                    corpus,
+                    question,
+                    mode=mode,
+                    k=TOP_K,
+                    corpus_embs=corpus_embs,
+                )
+            context = "\n---\n".join(docs)
+            answer  = generate_answer(question, context)
+            score   = evaluate_relevance(question, context, answer)
+            m = evaluate_common_metrics(question, docs, corpus, answer, context)
+            elapsed = (time.time() - t0) * 1000
+            relevances.append(score)
+            latencies.append(elapsed)
+            precisions.append(m["context_precision"])
+            recalls.append(m["context_recall"])
+            faiths.append(m["faithfulness"])
+            hallucs.append(m["hallucination_rate"])
+
+            if i % 10 == 0 or i == len(questions):
+                print(f"    {i:>2}/{len(questions)}  avg_rel={np.mean(relevances):.3f}")
+
+        all_results[sys_name] = {
+            "mode": mode,
+            "avg_relevance": float(np.mean(relevances)),
+            "avg_latency_ms": float(np.mean(latencies)),
+            "avg_context_precision": float(np.mean(precisions)),
+            "avg_context_recall": float(np.mean(recalls)),
+            "avg_faithfulness": float(np.mean(faiths)),
+            "avg_hallucination_rate": float(np.mean(hallucs)),
+            "relevances": [float(r) for r in relevances],
+        }
+        print(f"    ✓ avg_relevance={all_results[sys_name]['avg_relevance']:.3f}\n")
+
+    # ── Stats ──────────────────────────────────────────────────────────────────
+    print("[2] Statistical Analysis")
+    a_scores = np.array(all_results["A_Recency"]["relevances"])
+    stats_output = {}
+
+    for name in ["B_Importance", "C_Relevance", "D_Combined"]:
+        b_scores = np.array(all_results[name]["relevances"])
+        t_stat, p_val = stats.ttest_rel(a_scores, b_scores)
+        pooled = np.sqrt((np.var(a_scores, ddof=1) + np.var(b_scores, ddof=1)) / 2)
+        d = float((np.mean(b_scores) - np.mean(a_scores)) / pooled) if pooled > 0 else 0.0
+        imp = (np.mean(b_scores) - np.mean(a_scores)) / max(np.mean(a_scores), 1e-9) * 100
+        stats_output[f"{name}_vs_A"] = {
+            "t_stat": float(t_stat), "p_value": float(p_val),
+            "cohens_d": d, "improvement_pct": float(imp), "significant": bool(p_val < 0.05),
+        }
+        print(f"  {name} vs A_Recency: t={t_stat:.3f}, p={p_val:.4f}, +{imp:.1f}%")
+
+    best = max(all_results, key=lambda k: all_results[k]["avg_relevance"])
+    print(f"\n  Best scoring: {best} (avg={all_results[best]['avg_relevance']:.3f})")
+
+    output = {
+        "scenario": "3_memory_scoring_strategies",
+        "best_strategy": best,
+        "best_combined_weights": {
+            "alpha_recency": float(best_weights[0]),
+            "beta_importance": float(best_weights[1]),
+            "gamma_relevance": float(best_weights[2]),
+            "grid_search_proxy_score": float(best_proxy),
+        },
+        "grid_search_top10": top_grid,
+        "systems": all_results,
+        "statistical_tests": stats_output,
+    }
+    out_dir = RESULTS_DIR / "scenario3"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / "results.json"
+    with open(out_file, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+    print(f"\n  ✓ Saved → {out_file}\n")
+    return output
 
 
 if __name__ == "__main__":
-    try:
-        run_scenario_3()
-    except Exception as e:
-        print(f"\n✗ Error: {e}")
-        import traceback
-        traceback.print_exc()
+    run()

@@ -1,0 +1,13 @@
+{
+  "run_at": "2026-05-14T10:23:18.523936",
+  "scenarios_run": [
+    5
+  ],
+  "total_elapsed_sec": 36.0,
+  "results": {
+    "scenario_5": {
+      "status": "completed",
+      "elapsed_sec": 36.0
+    }
+  }
+}

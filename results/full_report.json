@@ -1,0 +1,155 @@
+{
+  "generated_at": "2026-05-14T10:23:23.406826",
+  "scenarios": [
+    {
+      "scenario": "scenario1",
+      "status": "completed",
+      "hypothesis_passed": true,
+      "best_system": "B_Cosine",
+      "best_avg_relevance": 0.8385,
+      "ranking": [
+        {
+          "system": "B_Cosine",
+          "avg_relevance": 0.8385,
+          "avg_latency_ms": 50.2
+        },
+        {
+          "system": "C_Semantic",
+          "avg_relevance": 0.8305,
+          "avg_latency_ms": 50.0
+        },
+        {
+          "system": "D_KG",
+          "avg_relevance": 0.8258,
+          "avg_latency_ms": 46.1
+        },
+        {
+          "system": "A_Random",
+          "avg_relevance": 0.7346,
+          "avg_latency_ms": 164.9
+        }
+      ]
+    },
+    {
+      "scenario": "scenario2",
+      "status": "completed",
+      "hypothesis_passed": true,
+      "best_system": "A_Sentence",
+      "best_avg_relevance": 0.8316,
+      "ranking": [
+        {
+          "system": "A_Sentence",
+          "avg_relevance": 0.8316,
+          "avg_latency_ms": 174.9
+        },
+        {
+          "system": "C_Semantic",
+          "avg_relevance": 0.8283,
+          "avg_latency_ms": 52.5
+        },
+        {
+          "system": "B_FixedSize",
+          "avg_relevance": 0.8201,
+          "avg_latency_ms": 66.6
+        }
+      ]
+    },
+    {
+      "scenario": "scenario3",
+      "status": "completed",
+      "hypothesis_passed": true,
+      "best_system": "D_Combined",
+      "best_avg_relevance": 0.8417,
+      "ranking": [
+        {
+          "system": "D_Combined",
+          "avg_relevance": 0.8417,
+          "avg_latency_ms": 56.3
+        },
+        {
+          "system": "C_Relevance",
+          "avg_relevance": 0.8385,
+          "avg_latency_ms": 56.4
+        },
+        {
+          "system": "A_Recency",
+          "avg_relevance": 0.7501,
+          "avg_latency_ms": 178.9
+        },
+        {
+          "system": "B_Importance",
+          "avg_relevance": 0.6984,
+          "avg_latency_ms": 67.2
+        }
+      ]
+    },
+    {
+      "scenario": "scenario4",
+      "status": "completed",
+      "hypothesis_passed": true,
+      "best_system": "A_RAG_Dense",
+      "best_avg_relevance": 0.8385,
+      "ranking": [
+        {
+          "system": "A_RAG_Dense",
+          "avg_relevance": 0.8385,
+          "avg_latency_ms": 405.0
+        },
+        {
+          "system": "D_KG_Hybrid",
+          "avg_relevance": 0.8258,
+          "avg_latency_ms": 183.6
+        },
+        {
+          "system": "B_RAG_BM25",
+          "avg_relevance": 0.7982,
+          "avg_latency_ms": 427.9
+        },
+        {
+          "system": "C_KG_Entity",
+          "avg_relevance": 0.7432,
+          "avg_latency_ms": 183.1
+        }
+      ]
+    },
+    {
+      "scenario": "scenario5",
+      "status": "completed",
+      "hypothesis_passed": true,
+      "best_system": "N_1",
+      "best_avg_relevance": 1.0,
+      "ranking": [
+        {
+          "system": "N_1",
+          "avg_relevance": 1.0,
+          "avg_latency_ms": 519.1
+        },
+        {
+          "system": "N_2",
+          "avg_relevance": 1.0,
+          "avg_latency_ms": 53.6
+        },
+        {
+          "system": "N_4",
+          "avg_relevance": 0.3333,
+          "avg_latency_ms": 53.6
+        },
+        {
+          "system": "N_8",
+          "avg_relevance": 0.2333,
+          "avg_latency_ms": 54.4
+        },
+        {
+          "system": "N_16",
+          "avg_relevance": 0.1667,
+          "avg_latency_ms": 55.2
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total": 5,
+    "completed": 5,
+    "hypotheses_passed": 5
+  }
+}
